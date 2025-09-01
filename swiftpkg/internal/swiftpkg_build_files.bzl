@@ -723,10 +723,6 @@ def _xcframework_import_build_file(pkg_ctx, target, artifact_info):
     if artifact_info.link_type == link_types.static:
         load_stmts = [apple_static_xcframework_import_load_stmt]
         kind = apple_kinds.static_xcframework_import
-
-        # Firebase example requires that GoogleAppMeasurement symbols are
-        # passed along.
-        attrs["alwayslink"] = True
     elif artifact_info.link_type == link_types.dynamic:
         load_stmts = [apple_dynamic_xcframework_import_load_stmt]
         kind = apple_kinds.dynamic_xcframework_import
