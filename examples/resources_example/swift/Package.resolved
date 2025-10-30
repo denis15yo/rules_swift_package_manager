@@ -77,8 +77,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/GoogleCloudPlatform/recaptcha-enterprise-mobile-sdk",
       "state" : {
-        "revision" : "5ec74256124faa7e7814c574509723f49e1fccfb",
-        "version" : "18.7.0"
+        "revision" : "c6ce6a5790f0e0b70e66025ec1aa3c4aced13cc6",
+        "version" : "18.8.1"
       }
     },
     {
@@ -86,8 +86,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/SDWebImage/SDWebImage.git",
       "state" : {
-        "revision" : "b62cb63bf4ed1f04c961a56c9c6c9d5ab8524ec6",
-        "version" : "5.21.1"
+        "revision" : "2053b120767c42a70bcba21095f34e4cfb54a75d",
+        "version" : "5.21.3"
       }
     },
     {
@@ -104,8 +104,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Iterable/swift-sdk",
       "state" : {
-        "revision" : "1ebe23a85dbaeba5f7d3d1f8559cee6a4e2ff137",
-        "version" : "6.5.13"
+        "revision" : "d4fc7d37b866f9fef4a778908910deb8eee62f0f",
+        "version" : "6.6.1"
       }
     }
   ],
