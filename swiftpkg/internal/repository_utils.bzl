@@ -33,7 +33,8 @@ def _execute_spm_command(
         working_directory: Working directory for command execution. Can be
                            relative to the repository root or absolute.
         err_msg_tpl: Optional. A `string` template which will be formatted with
-                     the `exec_args` and `stderr` values.
+                     the `working_directory`, `exec_args`, `return_code`,
+                     `stdout`, and `stderr` values.
 
     Returns:
         A `string` representing the stdout of the command execution.
@@ -59,15 +60,17 @@ def _execute_spm_command(
     if exec_result.return_code != 0 and not _can_ignore_spm_error(exec_result):
         if err_msg_tpl == None:
             err_msg_tpl = """\
-Failed to execute SPM command. \
-working_directory: {working_directory}, \
-args: {exec_args}, \
-return_code: {return_code}\
-\n{stderr}.\
+Failed to execute SPM command.
+  working_directory: {working_directory}
+  args: {exec_args}
+  return_code: {return_code}
+  stdout: {stdout}
+  stderr: {stderr}\
 """
         fail(err_msg_tpl.format(
             working_directory = working_directory,
             exec_args = exec_args,
+            stdout = exec_result.stdout,
             stderr = exec_result.stderr,
             return_code = exec_result.return_code,
         ))
@@ -164,6 +167,21 @@ def _struct_to_kwargs(*, struct, keys):
             kwargs[k] = v
     return kwargs
 
+def _copy(repository_ctx, src, dest):
+    """Copies a file into the repository.
+
+    Reads the content of `src` and writes it to `dest` within the
+    repository.  This is useful for copying files without requiring
+    the source to use `exports_files(...)`.
+
+    Args:
+        repository_ctx: A `repository_ctx` instance.
+        src: A `Label` or path pointing to the source file.
+        dest: A `string` path for the destination within the repository.
+    """
+    content = repository_ctx.read(src)
+    repository_ctx.file(dest, content = content, executable = False)
+
 def _replace_working_directory(json_str, working_directory):
     """Replace the working directory prefix in a JSON string.
 
@@ -188,6 +206,7 @@ def _replace_working_directory(json_str, working_directory):
     return json_str.replace(working_directory + "/", "./")
 
 repository_utils = struct(
+    copy = _copy,
     exec_spm_command = _execute_spm_command,
     is_macos = _is_macos,
     package_name = _package_name,

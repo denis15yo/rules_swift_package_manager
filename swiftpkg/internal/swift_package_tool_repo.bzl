@@ -1,78 +1,127 @@
-"""Defines the `swift_package_tool_repo` repository rule that creates `swift_package_tool` targets."""
+"""Defines the `swift_package_tool_repo` repository rule.
+
+The rule generates a workspace exposing `swift_worker_binary` targets
+named `update` and `resolve` that drive `swift package` commands.
+"""
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("@bazel_skylib//lib:types.bzl", "types")
+load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//swiftpkg/internal:bools.bzl", "bools")
+load("//swiftpkg/internal:build_decls.bzl", "build_decls")
+load("//swiftpkg/internal:build_files.bzl", "build_files")
+load("//swiftpkg/internal:load_statements.bzl", "load_statements")
+load("//swiftpkg/internal:manifest_swiftc_args.bzl", "manifest_swiftc_args")
 load("//swiftpkg/internal:repo_rules.bzl", "repo_rules")
 load("//swiftpkg/internal:repository_utils.bzl", "repository_utils")
 load("//swiftpkg/internal:swift_package_tool_attrs.bzl", "swift_package_tool_attrs")
 
-def _package_config_attrs_to_content(attrs):
-    """Returns a BUILD file compatible string representation of the keyword arguments"""
-    kwargs = repository_utils.struct_to_kwargs(
-        struct = attrs,
-        keys = dicts.add(
-            repo_rules.env_attr,
-            swift_package_tool_attrs.swift_package_tool_config,
-            swift_package_tool_attrs.swift_package_registry,
-        ),
-    )
+def _collect_extra_args(repository_ctx, cmd):
+    """Builds the extra_args list for the swift_worker_binary target.
 
-    kwarg_lines = []
-    for k, v in kwargs.items():
-        if types.is_string(v) or type(v) == "Label":
-            kwarg_lines.append("    {key} = \"{value}\"".format(key = k, value = v))
-        elif types.is_bool(v):
-            kwarg_lines.append("    {key} = {value}".format(key = k, value = "True" if v else "False"))
-        elif types.is_dict(v):
-            json_str = json.encode(v)
-            kwarg_lines.append("    {key} = {value}".format(key = k, value = json_str))
-        else:
-            fail("Unsupported value type for attribute {key}: {value}".format(key = k, value = v))
+    Args:
+        repository_ctx: A `repository_ctx` instance.
+        cmd: The swift package command ("update" or "resolve").
 
-    return ",\n".join(kwarg_lines)
+    Returns:
+        A `list` of string arguments.
+    """
+    attr = repository_ctx.attr
+    pkg_dir = paths.dirname(attr.package)
+
+    args = [
+        "--cmd",
+        cmd,
+        "--package_path",
+        pkg_dir,
+        "--build_path",
+        attr.build_path,
+        "--cache_path",
+        attr.cache_path,
+        "--config_path",
+        attr.config_path,
+        "--security_path",
+        attr.security_path,
+        "--enable_build_manifest_caching",
+        bools.to_shell_str(attr.manifest_caching),
+        "--enable_dependency_cache",
+        bools.to_shell_str(attr.dependency_caching),
+        "--manifest_cache",
+        attr.manifest_cache,
+        "--replace_scm_with_registry",
+        bools.to_shell_str(attr.replace_scm_with_registry),
+        "--use_registry_identity_for_scm",
+        bools.to_shell_str(attr.use_registry_identity_for_scm),
+    ]
+
+    # The repo rule path copies netrc/registries files into the
+    # generated repo (see _swift_package_tool_repo_impl) and references
+    # them by local label. The macro path in swift_package_tool.bzl
+    # uses $(rootpath <user_label>) directly. Keep both in sync.
+    if attr.netrc:
+        args.extend(["--netrc_file", "$(rootpath :.netrc)"])
+
+    if attr.registries:
+        args.extend(["--registries_json", "$(rootpath :registries.json)"])
+
+    if attr.env:
+        for k, v in attr.env.items():
+            args.extend(["--env", "%s=%s" % (k, v)])
+
+    manifest_flags = " ".join(manifest_swiftc_args.BAZEL_DEFINE)
+    if manifest_flags:
+        args.extend(["--manifest_swiftc_flags", manifest_flags])
+
+    return args
 
 def _swift_package_tool_repo_impl(repository_ctx):
-    attrs_content = _package_config_attrs_to_content(repository_ctx.attr)
-    package_path = repository_ctx.attr.package
+    data = []
 
-    # We copy .netrc file contents to avoid requiring users to use `exports_files(...)`
-    netrc_attr = None
     if repository_ctx.attr.netrc:
-        netrc_content = repository_ctx.read(repository_ctx.attr.netrc)
-        repository_ctx.file(".netrc", netrc_content)
-        netrc_attr = '    netrc = ":.netrc",'
+        repository_utils.copy(
+            repository_ctx,
+            repository_ctx.attr.netrc,
+            ".netrc",
+        )
+        data.append(":.netrc")
 
-    attrs_lines = [line for line in attrs_content.split("\n") if "netrc =" not in line]
-    filtered_attrs = "\n".join(attrs_lines)
+    if repository_ctx.attr.registries:
+        repository_utils.copy(
+            repository_ctx,
+            repository_ctx.attr.registries,
+            "registries.json",
+        )
+        data.append(":registries.json")
 
-    final_attrs_parts = [filtered_attrs]
-    if netrc_attr:
-        final_attrs_parts.append(netrc_attr)
-    final_attrs_content = "\n".join([p for p in final_attrs_parts if p])
+    update_args = _collect_extra_args(repository_ctx, "update")
+    resolve_args = _collect_extra_args(repository_ctx, "resolve")
 
-    repository_ctx.file(
-        "BUILD.bazel",
-        content = """
-load("@rules_swift_package_manager//swiftpkg:defs.bzl", "swift_package_tool")
+    common_attrs = {
+        "tool": "@rules_swift_package_manager//tools/swift_package_cmd",
+    }
+    if data:
+        common_attrs["data"] = data
 
-swift_package_tool(
-    name = "update",
-    cmd = "update",
-    package = "{package}",
-{attrs_content}
-)
-
-swift_package_tool(
-    name = "resolve",
-    cmd = "resolve",
-    package = "{package}",
-{attrs_content}
-)
-""".format(
-            package = package_path,
-            attrs_content = final_attrs_content,
-        ),
+    bld_file = build_files.new(
+        load_stmts = [
+            load_statements.new(
+                "@rules_swift_package_manager//swiftpkg:defs.bzl",
+                "swift_worker_binary",
+            ),
+        ],
+        decls = [
+            build_decls.new(
+                "swift_worker_binary",
+                name = "update",
+                attrs = dicts.add(common_attrs, {"extra_args": update_args}),
+            ),
+            build_decls.new(
+                "swift_worker_binary",
+                name = "resolve",
+                attrs = dicts.add(common_attrs, {"extra_args": resolve_args}),
+            ),
+        ],
     )
+    build_files.write(repository_ctx, bld_file, "")
 
 swift_package_tool_repo = repository_rule(
     implementation = _swift_package_tool_repo_impl,
@@ -80,17 +129,17 @@ swift_package_tool_repo = repository_rule(
         repo_rules.env_attr,
         {
             "package": attr.string(
-                doc = "The relative path to the `Package.swift` file to operate on.",
+                doc = """\
+The relative path to the `Package.swift` file to operate on.\
+""",
                 mandatory = True,
             ),
         },
         swift_package_tool_attrs.swift_package_tool_config,
         swift_package_tool_attrs.swift_package_registry,
     ),
-    doc = "Declares a `@swift_package` repository for using the `swift_package_tool` targets.",
-)
-
-# Exported for testing
-swift_package_tool_repo_testing = struct(
-    package_config_attrs_to_content = _package_config_attrs_to_content,
+    doc = """\
+Declares a `@swift_package` repository for using the `swift_worker_binary` \
+targets.\
+""",
 )
